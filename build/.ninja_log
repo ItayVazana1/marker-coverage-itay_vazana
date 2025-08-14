@@ -1,0 +1,9 @@
+# ninja log v7
+22	345	7768876746185897	CMakeFiles/mce_lib.dir/src/ansi.cpp.obj	da9925bdeaf8b385
+35	2320	7768876746335965	CMakeFiles/mce_lib.dir/src/main.cpp.obj	691d0bce9f099f01
+62	2326	7768876746595926	CMakeFiles/MCE_by_IV.dir/src/main.cpp.obj	f06a3edf037d6536
+31	2334	7768876746275918	CMakeFiles/mce_lib.dir/src/app.cpp.obj	7cd8f937615bb541
+41	2503	7768876746435938	CMakeFiles/mce_lib.dir/src/progress.cpp.obj	69316d149378a2ae
+52	2745	7768876746525918	CMakeFiles/mce_lib.dir/src/ui.cpp.obj	82beaf40be5cee43
+2746	2884	7768876773423085	libmce_lib.a	d42be359decb7d5a
+2884	3164	7768876774813091	MCE_by_IV.exe	62870ece577f28ec

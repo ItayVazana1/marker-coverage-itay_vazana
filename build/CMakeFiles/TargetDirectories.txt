@@ -1,0 +1,4 @@
+C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/mce_lib.dir
+C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/MCE_by_IV.dir
+C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/edit_cache.dir
+C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/rebuild_cache.dir
