@@ -12,22 +12,22 @@ else()
 endif()
 
 # ---- OpenCV ----
-# Help CMake find OpenCV on Windows MSYS2; on Linux (Docker) it will be found automatically.
+# Hint for MSYS2 UCRT64 on Windows; on Linux (e.g., Docker) it'll be found normally.
 if (WIN32 AND DEFINED ENV{MSYSTEM} AND "$ENV{MSYSTEM}" STREQUAL "UCRT64")
   set(OpenCV_DIR "C:/msys64/ucrt64/lib/cmake/opencv4" CACHE PATH "" FORCE)
 endif()
+# detect_and_compute משתמש ב-core,imgproc,imgcodecs בלבד
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 
 # ---- Core lib ----
 add_library(mce_core
-  src/detector.cpp
-  src/coverage.cpp
+  src/detect_and_compute.cpp    # ← החדש
   src/log.cpp
 )
 target_include_directories(mce_core PUBLIC include ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(mce_core PUBLIC ${OpenCV_LIBS})
 
-# ---- TUI executable ONLY ----
+# ---- TUI executable ----
 add_executable(MCE_by_IV
   src/main.cpp
   src/app.cpp

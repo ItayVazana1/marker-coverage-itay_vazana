@@ -1,8 +1,9 @@
 #include "mce/progress.hpp"
 #include "mce/ansi.hpp"
-#include "mce/detector.hpp"
-#include "mce/coverage.hpp"
 #include "mce/log.hpp"
+
+// unified detection+coverage API
+#include "mce/detect_and_compute.hpp"
 
 #include <opencv2/imgcodecs.hpp>
 
@@ -19,7 +20,6 @@ namespace fs = std::filesystem;
 
 namespace
 {
-
     fs::path resolve_output_root()
     {
         const char *env = std::getenv("MCE_OUTPUT_ROOT");
@@ -79,8 +79,11 @@ namespace app::progress
 
         const fs::path csvPath = resultsDir / (ts + ".csv");
         std::ofstream csv(csvPath);
-        // NEW: add elapsed_ms column
-        csv << "index,input_path,found,percent,debug_quad,debug_warp,debug_mask,elapsed_ms\n";
+
+        // CSV header: telemetry + all debug artifacts (incl. crop/clip)
+        csv << "index,input_path,found,percent,angle_deg,occupancy,hue_score,line_ok,"
+               "debug_quad,debug_warp,debug_mask,debug_crop,debug_clip,"
+               "elapsed_ms,Smin,Vmin,Vmax\n";
 
         const int N = static_cast<int>(images.size());
         std::cout << mce::ansi::title << "Running detection on " << N
@@ -117,23 +120,40 @@ namespace app::progress
                           << mce::ansi::reset
                           << mce::ansi::muted << " [" << ms << " ms]"
                           << mce::ansi::reset << "\n";
-                csv << i << "," << '"' << path << '"' << ",0,,,,," << ms << "\n";
+
+                // Write a row with the right number of columns (empty fields)
+                csv << i << "," << '"' << path << '"' << ",0,,,,," // found..line_ok
+                    << ",,,,,"                                     // debug paths (5) incl. crop/clip
+                    << ms << ",,,"                                 // elapsed + S/V thresholds
+                    << "\n";
                 continue;
             }
 
-            // Build debug base under our organized debug dir
+            // Build debug base under our organized debug dir: .../debug/<ts>/<i>_<name>
             std::string prefix = std::to_string(i) + "_" + stem_of(path);
-            fs::path debugBasePath = debugDir / prefix; // .../debug/<ts>/<i>_<name>
+            fs::path debugBasePath = debugDir / prefix;
             std::string debugBase = debugBasePath.string();
 
-            std::vector<cv::Point2f> quad;
-            bool ok = mce::detect_marker_polygon(img, quad, state.debug, state.saveDebug, debugBase);
+            // Precompute crop/clip paths (we know the suffixes used inside detect_and_compute)
+            const std::string cropPath = debugBase + "_debug_crop.png";
+            const std::string clipPath = debugBase + "_debug_clip.png";
 
-            int pct = -1;
-            if (ok)
+            // ---- Single call to unified detector+coverage ----
+            mce::DetectOutput out;
+            bool ok = mce::detect_and_compute(img, out, state.debug, state.saveDebug, debugBase);
+
+            if (ok && out.found)
             {
-                pct = mce::coverage_percent(quad, img.size());
-                std::cout << path << " " << pct << "%\n";
+                // Console line with telemetry
+                std::cout << path << "  "
+                          << out.coverage_percent << "%  "
+                          << mce::ansi::muted
+                          << "(angle=" << std::fixed << std::setprecision(1) << out.best_angle_deg
+                          << "°, occ=" << std::setprecision(2) << out.occupancy
+                          << ", hue=" << std::setprecision(2) << out.hue_score
+                          << ", line=" << (out.line_ok ? "ok" : "no") << ")"
+                          << mce::ansi::reset << "\n";
+
                 if (state.saveDebug)
                 {
                     std::cout << mce::ansi::ok << "        Saved result."
@@ -151,38 +171,61 @@ namespace app::progress
             long long ms = duration_cast<milliseconds>(t1 - t0).count();
             total_ms_accum += ms;
 
-            // show timing inline
+            // inline timing
             std::cout << mce::ansi::muted << "        [" << ms << " ms]"
                       << mce::ansi::reset << "\n";
 
-            // write CSV row (with ms)
-            if (!ok)
+            // ---- CSV row ----
+            if (!ok || !out.found)
             {
-                csv << i << "," << '"' << path << '"' << ",0,,,";
+                csv << i << "," << '"' << path << '"' << ",0," // index,input,found
+                    << ","                                     // percent
+                    << ","                                     // angle_deg
+                    << ","                                     // occupancy
+                    << ","                                     // hue_score
+                    << ",";                                    // line_ok
+
                 if (state.saveDebug)
                 {
-                    csv << '"' << (debugBase + "_debug_mask.png") << '"';
+                    csv << "," << "," << "," // debug_quad, debug_warp, debug_mask
+                        << "," << ",";       // debug_crop, debug_clip
                 }
                 else
                 {
-                    csv << "";
+                    csv << "," << "," << "," << "," << ","; // 5 empty debug columns
                 }
-                csv << "," << ms << "\n";
+
+                csv << ms << "," // elapsed_ms
+                    << out.Smin << "," << out.Vmin << "," << out.Vmax
+                    << "\n";
             }
             else
             {
-                csv << i << "," << '"' << path << '"' << ",1," << pct << ",";
+                // found == 1
+                csv << i << "," << '"' << path << '"' << ",1,"
+                    << out.coverage_percent << ","
+                    << std::fixed << std::setprecision(2) << out.best_angle_deg << ","
+                    << out.occupancy << ","
+                    << out.hue_score << ","
+                    << (out.line_ok ? 1 : 0) << ",";
+
                 if (state.saveDebug)
                 {
-                    csv << '"' << (debugBase + "_debug_quad.png") << '"' << ","
-                        << '"' << (debugBase + "_debug_warp.png") << '"' << ","
-                        << '"' << (debugBase + "_debug_mask.png") << '"';
+                    csv << '"' << out.debug_quad_path << '"' << ","
+                        << '"' << out.debug_warp_path << '"' << ","
+                        << '"' << out.debug_mask_path << '"' << ","
+                        << '"' << cropPath << '"' << ","
+                        << '"' << clipPath << '"';
                 }
                 else
                 {
-                    csv << ",,";
+                    csv << ",,,,"; // five empty debug columns
                 }
-                csv << "," << ms << "\n";
+
+                csv << "," << ms << ","
+                    << out.Smin << ","
+                    << out.Vmin << ","
+                    << out.Vmax << "\n";
             }
         }
 

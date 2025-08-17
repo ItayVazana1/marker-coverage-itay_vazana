@@ -8,16 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /work
 COPY . .
-
-# 🔧 ensure a fresh out-of-source build directory
 RUN rm -rf build CMakeFiles CMakeCache.txt
-
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-RUN cmake --build build
+RUN cmake --build build --config Release
 
 FROM ubuntu:22.04
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends libopencv-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopencv-core4.5 libopencv-imgproc4.5 libopencv-imgcodecs4.5 \
     && rm -rf /var/lib/apt/lists/*
 ENV TERM=xterm-256color
 

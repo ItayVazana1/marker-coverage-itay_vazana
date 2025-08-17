@@ -12,11 +12,8 @@ services:
     environment:
       TERM: xterm-256color
       MCE_HOST_ROOT: /host
-      MCE_OUTPUT_ROOT: /host/c/Users/Itay_Vazana/Desktop/MCE_CPP/outputs  # (optional)
+      MCE_OUTPUT_ROOT: /host/c/Users/Itay_Vazana/Desktop/MCE_CPP/outputs
     volumes:
       - type: bind
         source: "C:\\"
         target: /host/c
-      # - type: bind
-      #   source: "D:\\"
-      #   target: /host/d
