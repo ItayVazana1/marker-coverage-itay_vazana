@@ -14,25 +14,57 @@
 namespace mce
 {
 
-    // ---------------- Tunables ----------------
+    // ========================= Tunables (global defaults) =========================
+    // These are the strong defaults that gave you 8/10. We will adapt per-image
+    // inside detect_marker_polygon() without changing these globals.
     struct Params
     {
-        // mask + candidate thresholds
-        int S_MIN = 35;                      // min saturation (HSV) to consider "colored"
-        int V_MIN = 30;                      // min brightness (HSV)
-        double MIN_QUAD_AREA_FRAC = 0.00025; // min quad area vs image (0.025%)
+        // preprocess
+        int CLAHE_CLIP = 2;
+        int CLAHE_TILE = 8;
+        int RESIZE_MAX = 720;
 
-        // scoring
-        int DENSITY_MIN_PCT = 10;      // palette-pixel density inside quad (in %)
-        double SQUARE_PENALTY = 500.0; // penalty weight for non-square quads
-        double DENSITY_GAIN = 2000.0;  // gain for palette density
+        // HSV mask
+        int S_MIN = 28;
+        int V_MIN = 25;
+        int MORPH_K = 3; // 3×3
 
-        // warp + grid validation
-        int WARP_SIZE = 480;      // warped square resolution
-        double CELL_INSET = 0.12; // crop margin inside each cell (12% per side)
-        int CELL_MAJ_PCT = 30;    // majority % within a cell for a color label
-        int VALID_CELLS_REQ = 6;  // require >= 6/9 labeled cells
-        int DISTINCT_REQ = 2;     // require at least 2 distinct colors in 3x3
+        // contour candidates
+        int PERIMETER_MIN_MASK = 30;
+        int PERIMETER_MIN_EDGES = 35;
+        double APPROX_EPS_FRAC = 0.035;
+
+        // edges
+        int CANNY_LOW = 30;
+        int CANNY_HIGH = 90;
+        int DILATE_ITERS = 2;
+
+        // size gates / scoring
+        double MIN_QUAD_AREA_FRAC = 0.00006;
+        int DENSITY_MIN_PCT = 8;
+        double DENSITY_GAIN = 2000.0;
+        double SQUARE_PENALTY = 500.0;
+
+        // warp/grid
+        int WARP_SIZE = 480;
+        double CELL_INSET = 0.10;
+        int CELL_MAJ_PCT = 26;
+        int VALID_CELLS_REQ = 6;
+        int DISTINCT_REQ = 2;
+
+        // second-chance & fallback
+        double SECOND_CHANCE_SCALE = 2.0;
+        bool ADAPTIVE_FALLBACK = true;
+        int ADAPTIVE_BLOCK = 11;
+        int ADAPTIVE_C = 2;
+        int CANNY2_LOW = 20;
+        int CANNY2_HIGH = 60;
+        int DILATE2_ITERS = 1;
+
+        // debug
+        int TOP_K = 25;
+        bool SAVE_CANDIDATES_ON_FAIL = false; // can set true while tuning
+        int SAVE_CANDS_LIMIT = 10;
     };
     static Params P;
 
@@ -49,7 +81,7 @@ namespace mce
     };
     static const char *COLOR_NAME[] = {"R", "Y", "G", "C", "B", "M", "_"};
 
-    // HSV → palette (OpenCV hue 0..179). Bands widened a bit for robustness.
+    // HSV → palette (OpenCV hue 0..179)
     static inline Color classify_hsv_pixel(const cv::Vec3b &hsv)
     {
         const int h = hsv[0], s = hsv[1], v = hsv[2];
@@ -71,11 +103,14 @@ namespace mce
         return NONE;
     }
 
+    // Fix -Wmisleading-indentation by splitting returns.
     static void order_quad_tl_tr_br_bl(std::vector<cv::Point2f> &q)
     {
         std::sort(q.begin(), q.end(), [](const cv::Point2f &a, const cv::Point2f &b)
                   {
-        if (a.y != b.y) return a.y < b.y; return a.x < b.x; });
+        if (a.y != b.y)
+            return a.y < b.y;
+        return a.x < b.x; });
         cv::Point2f tl = (q[0].x <= q[1].x) ? q[0] : q[1];
         cv::Point2f tr = (q[0].x <= q[1].x) ? q[1] : q[0];
         cv::Point2f bl = (q[2].x <= q[3].x) ? q[2] : q[3];
@@ -83,14 +118,14 @@ namespace mce
         q = {tl, tr, br, bl};
     }
 
-    static double poly_area(const std::vector<cv::Point2f> &P)
+    static double poly_area(const std::vector<cv::Point2f> &Pp)
     {
         double A = 0;
-        int n = (int)P.size();
+        int n = (int)Pp.size();
         for (int i = 0; i < n; i++)
         {
             int j = (i + 1) % n;
-            A += P[i].x * P[j].y - P[j].x * P[i].y;
+            A += Pp[i].x * Pp[j].y - Pp[j].x * Pp[i].y;
         }
         return std::abs(A) * 0.5;
     }
@@ -104,11 +139,12 @@ namespace mce
             const cv::Vec3b *hr = hsv.ptr<cv::Vec3b>(y);
             uchar *mr = mask.ptr<uchar>(y);
             for (int x = 0; x < hsv.cols; ++x)
-            {
                 mr[x] = (classify_hsv_pixel(hr[x]) == NONE) ? 0 : 255;
-            }
         }
-        cv::Mat k = cv::getStructuringElement(cv::MORPH_RECT, {3, 3});
+        int ksz = std::max(1, P.MORPH_K);
+        if ((ksz & 1) == 0)
+            ksz += 1; // ensure odd
+        cv::Mat k = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(ksz, ksz));
         cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, k);
         cv::morphologyEx(mask, mask, cv::MORPH_OPEN, k);
         return mask;
@@ -129,8 +165,9 @@ namespace mce
         return 100.0 * double(insideColored) / double(insideTotal);
     }
 
-    // ----- candidate generation A: from palette mask -----
+    // ----- candidate generation A: from palette mask (uses per-call params) -----
     static void find_quads_from_mask(const cv::Mat &mask,
+                                     const Params &R,
                                      std::vector<std::vector<cv::Point>> &quads)
     {
         std::vector<std::vector<cv::Point>> contours;
@@ -138,40 +175,39 @@ namespace mce
         for (const auto &c : contours)
         {
             double per = cv::arcLength(c, true);
-            if (per < 50)
+            if (per < R.PERIMETER_MIN_MASK)
                 continue;
             std::vector<cv::Point> approx;
-            cv::approxPolyDP(c, approx, 0.02 * per, true);
+            cv::approxPolyDP(c, approx, R.APPROX_EPS_FRAC * per, true);
             if (approx.size() == 4 && cv::isContourConvex(approx))
-            {
                 quads.push_back(approx);
-            }
         }
     }
 
-    // ----- candidate generation B: from edges (white borders etc.) -----
+    // ----- candidate generation B: from edges (uses per-call params) -----
     static void find_quads_from_edges(const cv::Mat &smallBGR,
+                                      const Params &R,
                                       std::vector<std::vector<cv::Point>> &quads)
     {
         cv::Mat gray;
         cv::cvtColor(smallBGR, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, {5, 5}, 1.2);
+
         cv::Mat edges;
-        cv::Canny(gray, edges, 60, 180);
+        cv::Canny(gray, edges, R.CANNY_LOW, R.CANNY_HIGH);
+        cv::dilate(edges, edges, cv::Mat(), {-1, -1}, R.DILATE_ITERS);
 
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(edges, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         for (const auto &c : contours)
         {
             double per = cv::arcLength(c, true);
-            if (per < 60)
+            if (per < R.PERIMETER_MIN_EDGES)
                 continue;
             std::vector<cv::Point> approx;
-            cv::approxPolyDP(c, approx, 0.02 * per, true);
+            cv::approxPolyDP(c, approx, R.APPROX_EPS_FRAC * per, true);
             if (approx.size() == 4 && cv::isContourConvex(approx))
-            {
                 quads.push_back(approx);
-            }
         }
     }
 
@@ -191,7 +227,6 @@ namespace mce
         cellsOut.assign(9, NONE);
 
         for (int r = 0; r < 3; ++r)
-        {
             for (int c = 0; c < 3; ++c)
             {
                 cv::Rect roi(c * cellW + insetX, r * cellH + insetY,
@@ -205,10 +240,7 @@ namespace mce
                 {
                     const cv::Vec3b *pr = hsv.ptr<cv::Vec3b>(y);
                     for (int x = roi.x; x < roi.x + roi.width; ++x)
-                    {
-                        Color cl = classify_hsv_pixel(pr[x]);
-                        hist[cl]++;
-                    }
+                        hist[classify_hsv_pixel(pr[x])]++;
                 }
                 int bestIdx = 6, bestCnt = 0;
                 for (int k = 0; k < 7; ++k)
@@ -230,7 +262,6 @@ namespace mce
                     cellsOut[r * 3 + c] = NONE;
                 }
             }
-        }
         distinct = (int)kinds.size();
         return (valid >= P.VALID_CELLS_REQ) && (distinct >= P.DISTINCT_REQ);
     }
@@ -243,11 +274,24 @@ namespace mce
         if (bgr.empty())
             return false;
 
+        // ---- Contrast equalization on V channel (helps glare/low light) ----
+        cv::Mat hsv0;
+        cv::cvtColor(bgr, hsv0, cv::COLOR_BGR2HSV);
+        std::vector<cv::Mat> ch;
+        cv::split(hsv0, ch);
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE((double)P.CLAHE_CLIP,
+                                                   cv::Size(P.CLAHE_TILE, P.CLAHE_TILE));
+        clahe->apply(ch[2], ch[2]); // boost V
+        cv::merge(ch, hsv0);
+        cv::Mat bgr_eq;
+        cv::cvtColor(hsv0, bgr_eq, cv::COLOR_HSV2BGR);
+
         // ---- downscale for speed (keep factor) ----
-        cv::Mat small = bgr.clone();
-        double scale = 720.0 / std::max(bgr.cols, bgr.rows);
+        cv::Mat small = bgr_eq.clone();
+        const int longEdge = std::max(bgr_eq.cols, bgr_eq.rows);
+        double scale = (double)P.RESIZE_MAX / (double)longEdge;
         if (scale < 1.0)
-            cv::resize(bgr, small, cv::Size(), scale, scale);
+            cv::resize(bgr_eq, small, cv::Size(), scale, scale);
 
         // ---- palette mask on small ----
         cv::Mat hsvSmall;
@@ -265,15 +309,82 @@ namespace mce
             cv::imwrite(debugBase + "_debug_mask.png", palMaskBig);
         }
 
+        // ---------- Per-image auto-tuning (local copy W) ----------
+        Params W = P;
+
+        // Assess how big the color mask is.
+        double maskRatio = (double)cv::countNonZero(palMask) /
+                           (double)(palMask.cols * palMask.rows);
+
+        bool skipMaskCandidates = false;
+
+        // Heuristic 1: over-segmentation (e.g. warm/yellow scene like 3.png)
+        if (maskRatio > 0.25)
+        {
+            skipMaskCandidates = true;                              // ignore mask contours this frame
+            W.APPROX_EPS_FRAC = std::max(W.APPROX_EPS_FRAC, 0.040); // slightly looser quads
+            // Keep edges as primary signal; leave Canny as P to avoid over-connecting.
+        }
+
+        // Heuristic 2: under-segmentation / glare (like 9.png)
+        if (maskRatio < 0.015)
+        {
+            W.CANNY_LOW = std::min(W.CANNY_LOW, 24);
+            W.CANNY_HIGH = std::min(W.CANNY_HIGH, 72);
+            W.DILATE_ITERS = 1;
+            W.SECOND_CHANCE_SCALE = std::max(W.SECOND_CHANCE_SCALE, 2.5);
+            W.ADAPTIVE_FALLBACK = true;
+            W.ADAPTIVE_BLOCK = 9;
+            W.ADAPTIVE_C = 1;
+            W.CANNY2_LOW = 18;
+            W.CANNY2_HIGH = 54;
+        }
+        // -----------------------------------------------------------
+
         // ---- collect quad candidates from both paths ----
         std::vector<std::vector<cv::Point>> candSmall;
-        find_quads_from_mask(palMask, candSmall);
-        find_quads_from_edges(small, candSmall);
+        if (!skipMaskCandidates)
+            find_quads_from_mask(palMask, W, candSmall);
+        find_quads_from_edges(small, W, candSmall);
+
+        // -- second chance: upscale edges
+        if (candSmall.empty() && W.SECOND_CHANCE_SCALE > 1.0)
+        {
+            cv::Mat small2;
+            cv::resize(small, small2, cv::Size(), W.SECOND_CHANCE_SCALE, W.SECOND_CHANCE_SCALE, cv::INTER_LINEAR);
+            find_quads_from_edges(small2, W, candSmall);
+        }
+
+        // -- adaptive fallback if still empty
+        if (candSmall.empty() && W.ADAPTIVE_FALLBACK)
+        {
+            cv::Mat g, bin, e2;
+            cv::cvtColor(small, g, cv::COLOR_BGR2GRAY);
+            int blk = (W.ADAPTIVE_BLOCK % 2 == 0) ? W.ADAPTIVE_BLOCK + 1 : W.ADAPTIVE_BLOCK;
+            blk = std::max(3, blk);
+            cv::adaptiveThreshold(g, bin, 255, cv::ADAPTIVE_THRESH_MEAN_C,
+                                  cv::THRESH_BINARY, blk, W.ADAPTIVE_C);
+            cv::Canny(bin, e2, W.CANNY2_LOW, W.CANNY2_HIGH);
+            cv::dilate(e2, e2, cv::Mat(), {-1, -1}, W.DILATE2_ITERS);
+
+            std::vector<std::vector<cv::Point>> ct;
+            cv::findContours(e2, ct, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+            for (const auto &c : ct)
+            {
+                double per = cv::arcLength(c, true);
+                if (per < W.PERIMETER_MIN_EDGES)
+                    continue;
+                std::vector<cv::Point> approx;
+                cv::approxPolyDP(c, approx, W.APPROX_EPS_FRAC * per, true);
+                if (approx.size() == 4 && cv::isContourConvex(approx))
+                    candSmall.push_back(approx);
+            }
+        }
 
         if (candSmall.empty())
         {
             if (debug)
-                mce::log::d("No quad candidates found (mask+edges)");
+                mce::log::d("No quad candidates after second-chance (and adaptive fallback if enabled)");
             return false;
         }
 
@@ -295,6 +406,9 @@ namespace mce
                 continue;
 
             double density = mask_density_inside_poly(palMask, poly); // 0..100
+            if (density < P.DENSITY_MIN_PCT)
+                continue;
+
             cv::RotatedRect rr = cv::minAreaRect(poly);
             double w = std::max(1.f, rr.size.width), h = std::max(1.f, rr.size.height);
             double ratio = (w > h) ? w / h : h / w;
@@ -304,13 +418,33 @@ namespace mce
         }
 
         if (scored.empty())
+        {
+            if (saveDebug && P.SAVE_CANDIDATES_ON_FAIL)
+            {
+                // Draw whatever we had before filtering, up to limit.
+                cv::Mat dbg = bgr.clone();
+                const double inv = (scale < 1.0) ? (1.0 / scale) : 1.0;
+                int limit = 0;
+                for (const auto &poly : candSmall)
+                {
+                    if (++limit > P.SAVE_CANDS_LIMIT)
+                        break;
+                    std::vector<std::vector<cv::Point>> polys(1);
+                    polys[0].reserve(poly.size());
+                    for (auto p : poly)
+                        polys[0].push_back({int(p.x * inv), int(p.y * inv)});
+                    cv::polylines(dbg, polys, true, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+                }
+                cv::imwrite(debugBase + "_debug_candidates.png", dbg);
+            }
             return false;
+        }
+
         std::sort(scored.begin(), scored.end(),
                   [](const Scored &a, const Scored &b)
                   { return a.score > b.score; });
 
-        // try top-k candidates (up to 12)
-        const int K = std::min<int>(12, (int)scored.size());
+        const int K = std::min<int>(P.TOP_K, (int)scored.size());
         for (int k = 0; k < K; ++k)
         {
             const auto &poly = scored[k].poly;
@@ -344,10 +478,8 @@ namespace mce
             bool ok = validate_grid_3x3(warpBGR, valid, distinct, cells);
 
             if (debug)
-            {
                 mce::log::d("cand#" + std::to_string(k) + " score=" + std::to_string(scored[k].score) +
                             " valid=" + std::to_string(valid) + " distinct=" + std::to_string(distinct));
-            }
 
             if (!ok)
                 continue;
@@ -380,6 +512,24 @@ namespace mce
 
             outQuad = std::move(q);
             return true;
+        }
+
+        // If here, no candidate validated. Optionally dump the top candidates.
+        if (saveDebug && P.SAVE_CANDIDATES_ON_FAIL)
+        {
+            cv::Mat dbg = bgr.clone();
+            int limit = std::min(P.SAVE_CANDS_LIMIT, (int)scored.size());
+            double inv = (scale < 1.0) ? (1.0 / scale) : 1.0;
+            for (int i = 0; i < limit; ++i)
+            {
+                const auto &poly = scored[i].poly;
+                std::vector<std::vector<cv::Point>> polys(1);
+                polys[0].reserve(poly.size());
+                for (auto p : poly)
+                    polys[0].push_back({int(p.x * inv), int(p.y * inv)});
+                cv::polylines(dbg, polys, true, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+            }
+            cv::imwrite(debugBase + "_debug_candidates.png", dbg);
         }
 
         return false; // no candidate validated
