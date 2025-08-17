@@ -1,4 +1,4 @@
-// src/detect_and_compute.cpp — RELAXED + FASTER + 5-PATH GRID VALIDATION (fixed)
+// src/detect_and_compute.cpp — FAST + 5-PATH GRID VALIDATION + ROI warp + OpenMP
 #include "mce/detect_and_compute.hpp"
 
 #include <opencv2/core.hpp>
@@ -9,6 +9,10 @@
 #include <vector>
 #include <cmath>
 #include <iostream>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace mce
 {
@@ -31,21 +35,21 @@ namespace mce
             double min_comp_frac = 0.0002;
             double max_comp_frac = 0.95;
 
-            // Angle scan (faster coarse sweep, adequate fine sweep)
+            // Angle scan (faster coarse sweep, tighter fine sweep)
             int coarse_step_deg = 2;
-            int coarse_range_deg = 35;
+            int coarse_range_deg = 25; // was 35
             int fine_step_deg = 1;
-            int fine_range_deg = 10;
+            int fine_range_deg = 6; // was 10
 
             // Tightened box validity inside rotated ROI
             double min_occupancy = 0.30;
             double max_aspect = 3.00;
 
             // 3×3 grid verification (after warp)
-            int warpSize = 480;
+            int warpSize = 360; // was 480
             double min_hue_score = 0.25;
-            double min_line_peak = 0.15; // prominence above baseline (0..1)
-            double min_peak_sep = 0.15;  // separation as fraction of length (0..1)
+            double min_line_peak = 0.12; // was 0.15
+            double min_peak_sep = 0.12;  // was 0.15
             double thirds_tol = 0.15;    // ±15% tolerance around 1/3, 2/3
 
             // Very large rectangles (we don't early-reject; only log)
@@ -342,7 +346,7 @@ namespace mce
 
         static cv::Mat strip_barcode_like(const cv::Mat &inBGR)
         {
-            // Detect very bright low-saturation band at top; if found, crop top ~12%
+            // Detect very bright low-sat band at top; if found, crop top ~12%
             cv::Mat hsv;
             cv::cvtColor(inBGR, hsv, cv::COLOR_BGR2HSV);
             std::vector<cv::Mat> ch;
@@ -364,13 +368,17 @@ namespace mce
         {
             cv::Mat gray;
             cv::cvtColor(warpedBGR, gray, cv::COLOR_BGR2GRAY);
-            cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(smallMode ? 1.5 : 2.0, cv::Size(8, 8));
-            clahe->apply(gray, gray);
+            if (!smallMode)
+            {
+                cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(2.0, cv::Size(8, 8));
+                clahe->apply(gray, gray);
+            }
             cv::GaussianBlur(gray, gray, cv::Size(3, 3), 0.0);
 
             cv::Mat bin;
             cv::adaptiveThreshold(gray, bin, 255, cv::ADAPTIVE_THRESH_MEAN_C,
                                   cv::THRESH_BINARY_INV, 21, 5);
+
             cv::dilate(bin, bin, cv::getStructuringElement(cv::MORPH_RECT, {3, 1}), cv::Point(-1, -1), 1);
             cv::dilate(bin, bin, cv::getStructuringElement(cv::MORPH_RECT, {1, 3}), cv::Point(-1, -1), 1);
 
@@ -385,9 +393,10 @@ namespace mce
                    two_peaks_prominence(py, prom, sep, /*anchor_thirds*/ true, P.thirds_tol);
         }
 
-        // 2) ColorGradient + Scharr (Hue on unit circle + V)
-        static bool validator_colorgrad_Scharr(const cv::Mat &warpedBGR, const Params &P, bool smallMode)
+        // 2) ColorGradient + Sobel (Hue on unit circle + V)
+        static bool validator_colorgrad_Sobel(const cv::Mat &warpedBGR, const Params &P, bool smallMode)
         {
+            (void)smallMode;
             cv::Mat hsv;
             cv::cvtColor(warpedBGR, hsv, cv::COLOR_BGR2HSV);
             std::vector<cv::Mat> ch;
@@ -407,25 +416,25 @@ namespace mce
             cv::Mat Vf;
             V.convertTo(Vf, CV_32F, 1.0 / 255.0);
 
-            auto scharrAbs = [](const cv::Mat &m, bool alongX)
+            auto sobelAbs = [](const cv::Mat &m, bool alongX)
             {
                 cv::Mat g;
                 if (alongX)
-                    cv::Scharr(m, g, CV_32F, 1, 0);
+                    cv::Sobel(m, g, CV_32F, 1, 0, 3);
                 else
-                    cv::Scharr(m, g, CV_32F, 0, 1);
+                    cv::Sobel(m, g, CV_32F, 0, 1, 3);
                 return cv::abs(g);
             };
             const float alpha = 0.35f;
-            cv::Mat gradHx = scharrAbs(Hcos, true) + scharrAbs(Hsin, true) + alpha * scharrAbs(Vf, true);
-            cv::Mat gradHy = scharrAbs(Hcos, false) + scharrAbs(Hsin, false) + alpha * scharrAbs(Vf, false);
+            cv::Mat gradHx = sobelAbs(Hcos, true) + sobelAbs(Hsin, true) + alpha * sobelAbs(Vf, true);
+            cv::Mat gradHy = sobelAbs(Hcos, false) + sobelAbs(Hsin, false) + alpha * sobelAbs(Vf, false);
 
             cv::Mat px, py;
             cv::reduce(gradHx, px, 0, cv::REDUCE_SUM, CV_32F);
             cv::reduce(gradHy, py, 1, cv::REDUCE_SUM, CV_32F);
 
-            double prom = smallMode ? std::min(0.12, P.min_line_peak) : P.min_line_peak;
-            double sep = smallMode ? std::min(0.12, P.min_peak_sep) : P.min_peak_sep;
+            double prom = P.min_line_peak;
+            double sep = P.min_peak_sep;
 
             return two_peaks_prominence(px, prom, sep, /*anchor_thirds*/ true, P.thirds_tol) &&
                    two_peaks_prominence(py, prom, sep, /*anchor_thirds*/ true, P.thirds_tol);
@@ -437,8 +446,8 @@ namespace mce
             cv::Mat gray;
             cv::cvtColor(warpedBGR, gray, cv::COLOR_BGR2GRAY);
             cv::Mat gx, gy;
-            cv::Scharr(gray, gx, CV_32F, 1, 0);
-            cv::Scharr(gray, gy, CV_32F, 0, 1);
+            cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+            cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
             cv::Mat mag = cv::abs(gx) + cv::abs(gy);
 
             cv::Mat px, py;
@@ -491,11 +500,10 @@ namespace mce
             return okX && okY;
         }
 
-        // 4) KMeans Color (K=7) on subsample + check label transitions near thirds
+        // 4) KMeans Color (K=6) on subsample + check label transitions near thirds
         static bool validator_kmeans_color(const cv::Mat &warpedBGR, const Params &P, bool smallMode)
         {
-            // Subsample grid to keep it fast
-            int stride = smallMode ? 6 : 4;
+            int stride = smallMode ? 8 : 6; // faster
             int rows = warpedBGR.rows, cols = warpedBGR.cols;
             int nsamp = (rows / stride) * (cols / stride);
             if (nsamp < 64)
@@ -531,13 +539,13 @@ namespace mce
                 }
             }
 
-            int K = 7;
+            int K = 6;
             cv::Mat labels, centers;
             cv::kmeans(samples, K, labels,
-                       cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 20, 1e-3),
+                       cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 10, 1e-3),
                        1, cv::KMEANS_PP_CENTERS, centers);
 
-            if (centers.rows < 6)
+            if (centers.rows < 5)
                 return false;
 
             // Map labels back to full grid at stride positions
@@ -608,9 +616,8 @@ namespace mce
         }
 
         // 5) Template correlation against ideal 3×3 edge map (normalized)
-        static bool validator_template_corr(const cv::Mat &warpedBGR, const Params &P, bool /*smallMode*/)
+        static bool validator_template_corr(const cv::Mat &warpedBGR, const Params & /*P*/, bool /*smallMode*/)
         {
-            (void)P; // silence unused parameter warning
             cv::Mat gray;
             cv::cvtColor(warpedBGR, gray, cv::COLOR_BGR2GRAY);
             cv::Mat gx, gy;
@@ -651,36 +658,27 @@ namespace mce
 
             bool smallMode = std::min(W.rows, W.cols) < 60;
 
-            bool v1 = validator_linepeaks_CLAHE(W, P, smallMode);
-            if (v1)
+            if (validator_linepeaks_CLAHE(W, P, smallMode))
             {
                 out.line_ok = true;
                 return;
             }
-
-            bool v2 = validator_colorgrad_Scharr(W, P, smallMode);
-            if (v2)
+            if (validator_colorgrad_Sobel(W, P, smallMode))
             {
                 out.line_ok = true;
                 return;
             }
-
-            bool v3 = validator_maxgap_2cuts(W, P, smallMode);
-            if (v3)
+            if (validator_maxgap_2cuts(W, P, smallMode))
             {
                 out.line_ok = true;
                 return;
             }
-
-            bool v4 = validator_kmeans_color(W, P, smallMode);
-            if (v4)
+            if (validator_kmeans_color(W, P, smallMode))
             {
                 out.line_ok = true;
                 return;
             }
-
-            bool v5 = validator_template_corr(W, P, smallMode);
-            out.line_ok = v5;
+            out.line_ok = validator_template_corr(W, P, smallMode);
         }
 
         // ============================== Drawing ==============================
@@ -764,7 +762,7 @@ namespace mce
         if (baseFrac > P.max_quad_area_frac && debug)
             std::cout << "[DBG] Base rect very large; continuing with scan anyway\n";
 
-        // (4) Angle scan: coarse→fine, keep best
+        // (4) Angle scan: coarse→fine, keep best (OpenMP)
         struct Best
         {
             double angle = 0, cov = 0, occ = 0, hue = 0;
@@ -773,65 +771,115 @@ namespace mce
         } best;
         bool earlyStop = false;
 
+        auto evaluate_angle = [&](double ang, Best &localBest)
+        {
+            cv::RotatedRect tight;
+            double occ = 0.0;
+            if (!rotate_and_tighten(comp, rr, ang, tight, occ))
+                return;
+
+            double w = tight.size.width, h = tight.size.height;
+            if (w <= 0 || h <= 0)
+                return;
+            double ar = std::max(w, h) / std::max(1.0, std::min(w, h));
+            if (occ < P.min_occupancy || ar > P.max_aspect)
+                return;
+
+            // --- ROI crop סביב ה-tightRect על המקור:
+            cv::Point2f tpts[4];
+            tight.points(tpts);
+            cv::Point2f TL, TR, BR, BL;
+            order_quad_tl_tr_br_bl(tpts, TL, TR, BR, BL);
+            std::vector<cv::Point2f> src = {TL, TR, BR, BL};
+
+            cv::Rect fullRoi = cv::boundingRect(src);
+            int pad = std::max(2, (int)std::round(0.10 * std::max(fullRoi.width, fullRoi.height)));
+            fullRoi.x = std::max(0, fullRoi.x - pad);
+            fullRoi.y = std::max(0, fullRoi.y - pad);
+            fullRoi.width = std::min(bgr.cols - fullRoi.x, fullRoi.width + 2 * pad);
+            fullRoi.height = std::min(bgr.rows - fullRoi.y, fullRoi.height + 2 * pad);
+
+            // הזז את הנקודות לקואורדינטות של ה-ROI
+            std::vector<cv::Point2f> srcR(4);
+            for (int i = 0; i < 4; ++i)
+                srcR[i] = cv::Point2f(src[i].x - fullRoi.x, src[i].y - fullRoi.y);
+
+            cv::Mat roiBGR = bgr(fullRoi);
+            std::vector<cv::Point2f> dst = {{0, 0}, {(float)P.warpSize - 1, 0}, {(float)P.warpSize - 1, (float)P.warpSize - 1}, {0, (float)P.warpSize - 1}};
+            cv::Mat H = cv::getPerspectiveTransform(srcR, dst);
+            cv::Mat warped;
+            cv::warpPerspective(roiBGR, warped, H, cv::Size(P.warpSize, P.warpSize));
+
+            // 5-path cascade
+            GridCheckResult gcr;
+            grid_checks_cascade(warped, gcr, P);
+            if (gcr.hue_score < P.min_hue_score || !gcr.line_ok)
+                return;
+
+            double area = w * h;
+            double cov = 100.0 * area / (double)(bgr.cols * bgr.rows);
+            double score = occ * (0.5 + 0.5 * gcr.hue_score);
+
+            double bestScore = localBest.occ * (0.5 + 0.5 * localBest.hue);
+            if (score > bestScore)
+            {
+                localBest.angle = ang;
+                localBest.cov = cov;
+                localBest.occ = occ;
+                localBest.hue = gcr.hue_score;
+                localBest.line_ok = gcr.line_ok;
+                localBest.tight = tight;
+            }
+        };
+
         auto scan = [&](int stepDeg, int rangeDeg) -> bool
         {
-            for (int d = -rangeDeg; d <= rangeDeg && !earlyStop; d += stepDeg)
+            // נכין את רשימת הזוויות מראש
+            std::vector<int> deltas;
+            for (int d = -rangeDeg; d <= rangeDeg; d += stepDeg)
+                deltas.push_back(d);
+
+            // Best מקומי לכל ת’רד
+            std::vector<Best> locals(
+#ifdef _OPENMP
+                std::max(1, omp_get_max_threads())
+#else
+                1
+#endif
+            );
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+            for (int i = 0; i < (int)deltas.size(); ++i)
             {
-                double ang = (best.cov > 0.0 ? best.angle : baseAngle) + d;
-
-                cv::RotatedRect tight;
-                double occ = 0.0;
-                if (!rotate_and_tighten(comp, rr, ang, tight, occ))
-                    continue;
-
-                double w = tight.size.width, h = tight.size.height;
-                if (w <= 0 || h <= 0)
-                    continue;
-                double ar = std::max(w, h) / std::max(1.0, std::min(w, h));
-                if (occ < P.min_occupancy || ar > P.max_aspect)
-                    continue;
-
-                // Warp
-                cv::Point2f tpts[4];
-                tight.points(tpts);
-                cv::Point2f TL, TR, BR, BL;
-                order_quad_tl_tr_br_bl(tpts, TL, TR, BR, BL);
-                std::vector<cv::Point2f> src = {TL, TR, BR, BL};
-                std::vector<cv::Point2f> dst = {{0, 0}, {(float)P.warpSize - 1, 0}, {(float)P.warpSize - 1, (float)P.warpSize - 1}, {0, (float)P.warpSize - 1}};
-                cv::Mat H = cv::getPerspectiveTransform(src, dst);
-                cv::Mat warped;
-                cv::warpPerspective(bgr, warped, H, cv::Size(P.warpSize, P.warpSize));
-
-                // 5-path cascade
-                GridCheckResult gcr;
-                grid_checks_cascade(warped, gcr, P);
-                if (gcr.hue_score < P.min_hue_score || !gcr.line_ok)
-                    continue;
-
-                double area = w * h;
-                double cov = 100.0 * area / (double)(bgr.cols * bgr.rows);
-                double score = occ * (0.5 + 0.5 * gcr.hue_score);
-
-                if (score > (best.occ * (0.5 + 0.5 * best.hue)))
-                {
-                    best.angle = ang;
-                    best.cov = cov;
-                    best.occ = occ;
-                    best.hue = gcr.hue_score;   // fixed
-                    best.line_ok = gcr.line_ok; // keep true state
-                    best.tight = tight;
-                    if (saveDebug)
-                    {
-                        out.debug_warp_path = debugBase + "_debug_warp.png";
-                        cv::imwrite(out.debug_warp_path, warped);
-                    }
-                }
-
-                // Early stop on very strong solution
-                if (best.occ > 0.82 && best.hue > 0.90 && best.line_ok)
-                    earlyStop = true;
+#ifdef _OPENMP
+                if (earlyStop)
+                    continue; // בדיקה רופפת
+                int tid = omp_get_thread_num();
+#else
+                int tid = 0;
+#endif
+                double ang = (best.cov > 0.0 ? best.angle : baseAngle) + deltas[i];
+                evaluate_angle(ang, locals[tid]);
             }
-            return earlyStop;
+
+            // מיזוג best מקומי לגלובלי
+            for (const auto &lb : locals)
+            {
+                double sLb = lb.occ * (0.5 + 0.5 * lb.hue);
+                double sGl = best.occ * (0.5 + 0.5 * best.hue);
+                if (sLb > sGl)
+                    best = lb;
+            }
+
+            // early stop if we have a good enough result
+            if (best.occ > 0.78 && best.hue > 0.85 && best.line_ok)
+            {
+                earlyStop = true;
+                return true;
+            }
+            return false;
         };
 
         if (!scan(P.coarse_step_deg, P.coarse_range_deg))
@@ -851,9 +899,23 @@ namespace mce
             order_quad_tl_tr_br_bl(rrPts, TL, TR, BR, BL);
             std::vector<cv::Point2f> src2 = {TL, TR, BR, BL};
             std::vector<cv::Point2f> dst2 = {{0, 0}, {(float)P.warpSize - 1, 0}, {(float)P.warpSize - 1, (float)P.warpSize - 1}, {0, (float)P.warpSize - 1}};
-            cv::Mat H2 = cv::getPerspectiveTransform(src2, dst2);
+
+            // ROI Fallback: crop around the minAreaRect
+            cv::Rect fullRoi = cv::boundingRect(src2);
+            int pad = std::max(2, (int)std::round(0.10 * std::max(fullRoi.width, fullRoi.height)));
+            fullRoi.x = std::max(0, fullRoi.x - pad);
+            fullRoi.y = std::max(0, fullRoi.y - pad);
+            fullRoi.width = std::min(bgr.cols - fullRoi.x, fullRoi.width + 2 * pad);
+            fullRoi.height = std::min(bgr.rows - fullRoi.y, fullRoi.height + 2 * pad);
+
+            std::vector<cv::Point2f> src2R(4);
+            for (int i = 0; i < 4; ++i)
+                src2R[i] = cv::Point2f(src2[i].x - fullRoi.x, src2[i].y - fullRoi.y);
+
+            cv::Mat roiBGR = bgr(fullRoi);
+            cv::Mat H2 = cv::getPerspectiveTransform(src2R, dst2);
             cv::Mat warped2;
-            cv::warpPerspective(bgr, warped2, H2, cv::Size(P.warpSize, P.warpSize));
+            cv::warpPerspective(roiBGR, warped2, H2, cv::Size(P.warpSize, P.warpSize));
 
             GridCheckResult gcr2;
             grid_checks_cascade(warped2, gcr2, P);
@@ -902,7 +964,7 @@ namespace mce
             out.debug_quad_path = debugBase + "_debug_quad.png";
             cv::imwrite(out.debug_quad_path, vis);
 
-            // perspective-corrected crop
+            // perspective-corrected crop (natural size)
             cv::Point2f pts[4];
             best.tight.points(pts);
             cv::Point2f TL, TR, BR, BL;
