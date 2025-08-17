@@ -1,9 +1,12 @@
 # ninja log v7
-22	345	7768876746185897	CMakeFiles/mce_lib.dir/src/ansi.cpp.obj	da9925bdeaf8b385
-35	2320	7768876746335965	CMakeFiles/mce_lib.dir/src/main.cpp.obj	691d0bce9f099f01
-62	2326	7768876746595926	CMakeFiles/MCE_by_IV.dir/src/main.cpp.obj	f06a3edf037d6536
-31	2334	7768876746275918	CMakeFiles/mce_lib.dir/src/app.cpp.obj	7cd8f937615bb541
-41	2503	7768876746435938	CMakeFiles/mce_lib.dir/src/progress.cpp.obj	69316d149378a2ae
-52	2745	7768876746525918	CMakeFiles/mce_lib.dir/src/ui.cpp.obj	82beaf40be5cee43
-2746	2884	7768876773423085	libmce_lib.a	d42be359decb7d5a
-2884	3164	7768876774813091	MCE_by_IV.exe	62870ece577f28ec
+21	1788	7768922480099925	CMakeFiles/mce_core.dir/src/log.cpp.obj	1b0869685c0f2b63
+18	2631	7768922480069924	CMakeFiles/mce_core.dir/src/coverage.cpp.obj	219ca5a32ed8fd79
+37	2826	7768922480259939	CMakeFiles/marker_coverage.dir/src/main_cli.cpp.obj	7d9ab25a37405815
+24	3583	7768922480119942	CMakeFiles/MCE_by_IV.dir/src/main.cpp.obj	26915c993bac0303
+27	3620	7768922480159924	CMakeFiles/MCE_by_IV.dir/src/app.cpp.obj	72aaf8818b15e576
+14	4180	7768922480029919	CMakeFiles/mce_core.dir/src/detector.cpp.obj	e391b335085e482
+30	4284	7768922480189922	CMakeFiles/MCE_by_IV.dir/src/ui.cpp.obj	43dde917126df6db
+4180	4491	7768922521690870	libmce_core.a	6fc989dd33e0e633
+4491	4884	7768922524800936	marker_coverage.exe	e1fb072bc75306a5
+33	5213	7768922480219929	CMakeFiles/MCE_by_IV.dir/src/progress.cpp.obj	22e5a8d34cdd2d25
+5214	5447	7768922532022387	MCE_by_IV.exe	33ca79d5a7e4d8cc

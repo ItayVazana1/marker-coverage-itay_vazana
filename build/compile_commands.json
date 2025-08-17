@@ -1,0 +1,50 @@
+[
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\mce_core.dir\\src\\detector.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\detector.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/detector.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/mce_core.dir/src/detector.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\mce_core.dir\\src\\coverage.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\coverage.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/coverage.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/mce_core.dir/src/coverage.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\mce_core.dir\\src\\log.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\log.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/log.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/mce_core.dir/src/log.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -D_CRT_SECURE_NO_WARNINGS -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\MCE_by_IV.dir\\src\\main.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\main.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/main.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/MCE_by_IV.dir/src/main.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -D_CRT_SECURE_NO_WARNINGS -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\MCE_by_IV.dir\\src\\app.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\app.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/app.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/MCE_by_IV.dir/src/app.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -D_CRT_SECURE_NO_WARNINGS -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\MCE_by_IV.dir\\src\\ui.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\ui.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/ui.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/MCE_by_IV.dir/src/ui.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -D_CRT_SECURE_NO_WARNINGS -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\MCE_by_IV.dir\\src\\progress.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\progress.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/progress.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/MCE_by_IV.dir/src/progress.cpp.obj"
+},
+{
+  "directory": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\c++.exe -IC:/Users/Itay_Vazana/Desktop/MCE_CPP/include -isystem C:/msys64/ucrt64/include/opencv4 -O3 -DNDEBUG -std=gnu++17 -Wall -Wextra -Wpedantic -o CMakeFiles\\marker_coverage.dir\\src\\main_cli.cpp.obj -c C:\\Users\\Itay_Vazana\\Desktop\\MCE_CPP\\src\\main_cli.cpp",
+  "file": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/src/main_cli.cpp",
+  "output": "C:/Users/Itay_Vazana/Desktop/MCE_CPP/build/CMakeFiles/marker_coverage.dir/src/main_cli.cpp.obj"
+}
+]
