@@ -1,4 +1,4 @@
-#include <iostream> // add this for std::cout
+#include <iostream> // for std::cout
 #include "mce/app.hpp"
 #include "mce/ui.hpp"
 #include "mce/ansi.hpp"
@@ -34,7 +34,7 @@ namespace app
             {
                 // Process current selection: iterate files, run detector, print results
                 auto imgs = ui::collect_images(state_.inputPath, state_.isDirectory);
-                app::progress::process_and_report(imgs, state_.debug, state_.saveDebug);
+                progress::process_and_report(imgs, state_); // <-- pass the whole state
                 break;
             }
             case 0:

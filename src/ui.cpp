@@ -9,8 +9,14 @@
 #include <cstdlib> // std::getenv
 #include <regex>
 
-namespace fs = std::filesystem;
+// --- Author / contact (from CV) ---
+static constexpr const char *kAuthorName = "Itay Vazana";
+static constexpr const char *kAuthorEmail = "itay.vazana.b@gmail.com";
+static constexpr const char *kAuthorLinkedIn = "linkedin.com/in/itayvazana";
+static constexpr const char *kAuthorGitHub = "github.com/ItayVazana1";
+static constexpr const char *kAuthorLocation = "Ashdod, Israel";
 
+namespace fs = std::filesystem;
 namespace app::ui
 {
 
@@ -91,19 +97,80 @@ Choose an option:
     void help()
     {
         title("Help");
+
         std::cout
-            << "- Provide a file or folder with PNG/JPEG images (option 1).\n"
-            << "- Toggle debug overlays/logging in Settings.\n"
-            << "- Run detection (option 5) to print '<file> <percent>%'.\n\n";
+            << mce::ansi::bold << "What this app does" << mce::ansi::reset << "\n"
+            << "• Detects the rectangular marker in each image and estimates its coverage (% of image area).\n"
+            << "• Works on a single file or an entire folder (PNG/JPG/JPEG).\n"
+            << "• Saves a CSV report and, if enabled, debug overlays.\n\n"
+
+            << mce::ansi::bold << "Quick start" << mce::ansi::reset << "\n"
+            << "1) " << mce::ansi::info << "Input" << mce::ansi::reset << ": Choose option 1 and paste a path.\n"
+            << "   - Windows (native): e.g. C:\\Users\\You\\Pictures\n"
+            << "   - Linux/Mac:        e.g. /home/you/images\n"
+            << "   - Docker Compose:   If your drive is mounted as /host/c, you can also paste a Windows path\n"
+            << "                       (C:\\...) and the app will map it internally to /host/c/... automatically.\n"
+            << "2) " << mce::ansi::info << "Settings" << mce::ansi::reset << ": Option 2. Toggle:\n"
+            << "   - Debug logs (prints extra diagnostic info in the console)\n"
+            << "   - Save debug overlays (writes *_debug_*.png files per image)\n"
+            << "3) " << mce::ansi::info << "Run" << mce::ansi::reset << ": Option 5 to process and see results.\n\n"
+
+            << mce::ansi::bold << "Outputs" << mce::ansi::reset << "\n"
+            << "• CSV report:   " << mce::ansi::muted << "mce_output/results/<YYYYMMDD-HHMMSS>.csv" << mce::ansi::reset << "\n"
+            << "• Debug images: " << mce::ansi::muted << "mce_output/debug/<YYYYMMDD-HHMMSS>/" << mce::ansi::reset << "\n"
+            << "  (Set " << mce::ansi::bold << "MCE_OUTPUT_ROOT" << mce::ansi::reset
+            << " to change the root output folder; in Docker you can point this to a host path.)\n\n"
+
+            << mce::ansi::bold << "Supported formats" << mce::ansi::reset << "\n"
+            << "• .png  .jpg  .jpeg\n\n"
+
+            << mce::ansi::bold << "Tips to improve detection" << mce::ansi::reset << "\n"
+            << "• Prefer images where the marker is fully visible and not extremely skewed.\n"
+            << "• Ensure good contrast between the marker and the background.\n"
+            << "• Try enabling debug overlays to review quad/warp/mask outputs and tune your input set if needed.\n\n"
+
+            << mce::ansi::bold << "Troubleshooting" << mce::ansi::reset << "\n"
+            << "• " << mce::ansi::warn << "Invalid path" << mce::ansi::reset << ": Path must exist inside the environment.\n"
+            << "  - In Docker: mount your host folder (or whole drive) and use the mapped path (e.g., /host/c/...).\n"
+            << "• " << mce::ansi::warn << "No marker found" << mce::ansi::reset << ": Check the debug images for the mask/edges.\n"
+            << "  - Try clearer lighting, less glare, or a straighter shot of the marker.\n\n";
+
         wait_for_enter();
     }
 
     void about()
     {
         title("About");
+
         std::cout
-            << "Decorated TUI on top of the required CLI logic.\n"
-            << "Uses OpenCV for marker detection and coverage estimation.\n\n";
+            << mce::ansi::bold << "Marker Coverage Estimator (TUI)" << mce::ansi::reset << "\n"
+            << "A colorful terminal UI for running the marker detection & coverage pipeline.\n\n"
+
+            << mce::ansi::bold << "Highlights" << mce::ansi::reset << "\n"
+            << "• Clean TUI: titles, colorized feedback, and simple menus.\n"
+            << "• Batch processing of folders with progress and per-image results.\n"
+            << "• Organized outputs: timestamped CSV + optional debug overlays.\n"
+            << "• Docker-friendly: works the same on any machine with Docker/Compose.\n\n"
+
+            << mce::ansi::bold << "Tech" << mce::ansi::reset << "\n"
+            << "• C++17, CMake, Ninja\n"
+            << "• OpenCV (core, imgproc, imgcodecs)\n"
+            << "• Docker/Compose for reproducible builds and runs\n\n"
+
+            << mce::ansi::bold << "Author" << mce::ansi::reset << "\n"
+            << "• " << kAuthorName << " — CS student & junior network engineer; experience across\n"
+            << "  software/systems, communications, and support/operations.\n"
+            << "• Location: " << kAuthorLocation << "\n\n"
+
+            << mce::ansi::bold << "Contact" << mce::ansi::reset << "\n"
+            << "• Email:    " << kAuthorEmail << "\n"
+            << "• LinkedIn: " << kAuthorLinkedIn << "\n"
+            << "• GitHub:   " << kAuthorGitHub << "\n\n"
+
+            << mce::ansi::muted
+            << "(Set TERM=xterm-256color for best colors. Run via Docker Compose for easy path mapping.)"
+            << mce::ansi::reset << "\n\n";
+
         wait_for_enter();
     }
 
