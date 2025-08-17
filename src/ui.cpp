@@ -1,9 +1,13 @@
 #include "mce/ui.hpp"
+#include "mce/app.hpp" // <-- add this include to get full definition of app::State
 #include "mce/ansi.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <limits>
-#include <cctype> // for std::isdigit
+#include <cctype>
+#include <cstdlib> // std::getenv
+#include <regex>
 
 namespace fs = std::filesystem;
 
@@ -21,6 +25,49 @@ Choose an option:
   0) Exit
 )MENU";
 
+    std::string trim(std::string s)
+    {
+        const auto sp = [](unsigned char c)
+        { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+        std::size_t a = 0;
+        while (a < s.size() && sp((unsigned char)s[a]))
+            ++a;
+        std::size_t b = s.size();
+        while (b > a && sp((unsigned char)s[b - 1]))
+            --b;
+        return s.substr(a, b - a);
+    }
+
+    std::string read_line(const std::string &prompt)
+    {
+        std::cout << mce::ansi::info << prompt << mce::ansi::reset;
+        std::string s;
+        std::getline(std::cin, s);
+        return s;
+    }
+
+    // Map "C:\Users\..." -> "/host/c/Users/..." if MCE_HOST_ROOT and drive bind are set in compose.yml
+    std::string map_host_path_if_needed(const std::string &in)
+    {
+        const char *root = std::getenv("MCE_HOST_ROOT"); // e.g. "/host"
+        if (!root || !*root)
+            return in;
+
+        static const std::regex winDrive(R"(^([A-Za-z]):[\\/](.*))");
+        std::smatch m;
+        if (std::regex_match(in, m, winDrive) && m.size() == 3)
+        {
+            std::string drive = m[1].str();
+            std::string rest = m[2].str();
+            for (auto &ch : rest)
+                if (ch == '\\')
+                    ch = '/';
+            const char lower = (char)std::tolower((unsigned char)drive[0]);
+            return std::string(root) + "/" + lower + "/" + rest; // "/host/c/Users/..."
+        }
+        return in;
+    }
+
     void title(const std::string &t)
     {
         mce::ansi::clear_screen();
@@ -28,7 +75,7 @@ Choose an option:
         std::cout << mce::ansi::muted << std::string(t.size(), '=') << mce::ansi::reset << "\n\n";
     }
 
-    void main_menu(const State &s)
+    void main_menu(const app::State &s)
     {
         title("Marker Coverage Estimator (TUI)");
         std::cout << kMenu << "\n";
@@ -55,7 +102,8 @@ Choose an option:
     {
         title("About");
         std::cout
-            << "Decorated TUI on top of the required CLI logic. Uses OpenCV for detection.\n\n";
+            << "Decorated TUI on top of the required CLI logic.\n"
+            << "Uses OpenCV for marker detection and coverage estimation.\n\n";
         wait_for_enter();
     }
 
@@ -65,32 +113,38 @@ Choose an option:
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     }
 
-    std::string trim(std::string s)
+    int read_menu_choice()
     {
-        const auto sp = [](unsigned char c)
+        std::cout << "Select (0-5): ";
+        std::string line;
+        std::getline(std::cin, line);
+        line = trim(line);
+        if (line.empty())
+            return -1;
+        bool ok = true;
+        for (char ch : line)
+            if (!std::isdigit((unsigned char)ch) && ch != '-' && ch != '+')
+            {
+                ok = false;
+                break;
+            }
+        if (!ok)
+            return -1;
+        try
         {
-            return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-        };
-        size_t a = 0;
-        while (a < s.size() && sp((unsigned char)s[a]))
-            ++a;
-        size_t b = s.size();
-        while (b > a && sp((unsigned char)s[b - 1]))
-            --b;
-        return s.substr(a, b - a);
+            return std::stoi(line);
+        }
+        catch (...)
+        {
+            return -1;
+        }
     }
 
-    std::string read_line(const std::string &prompt)
+    bool validate_path(app::State &s, const std::string &pathStr)
     {
-        std::cout << mce::ansi::info << prompt << mce::ansi::reset;
-        std::string s;
-        std::getline(std::cin, s);
-        return s;
-    }
+        const std::string mapped = map_host_path_if_needed(trim(pathStr));
+        const fs::path p = mapped;
 
-    bool validate_path(State &s, const std::string &pathStr)
-    {
-        const fs::path p = trim(pathStr);
         if (p.empty() || !fs::exists(p))
         {
             s.hasValidPath = false;
@@ -102,7 +156,7 @@ Choose an option:
         return true;
     }
 
-    void input(State &s)
+    void input(app::State &s)
     {
         title("Input");
         std::cout << "Provide a path to an image file or a folder.\n\n";
@@ -110,6 +164,7 @@ Choose an option:
                   << "Examples:\n"
                      "  C:\\Users\\You\\Pictures\\photo.jpg\n"
                      "  /home/you/images\n"
+                     "  /host/c/Users/You/Pictures   (when running in Docker Compose)\n"
                   << mce::ansi::reset << "\n";
 
         const std::string path = read_line("Path> ");
@@ -129,7 +184,7 @@ Choose an option:
         wait_for_enter();
     }
 
-    void settings(State &s)
+    void settings(app::State &s)
     {
         title("Settings");
         std::cout
@@ -140,30 +195,11 @@ Choose an option:
         std::cout << "Select: ";
         std::string line;
         std::getline(std::cin, line);
+        line = trim(line);
         if (line == "1")
             s.debug = !s.debug;
         else if (line == "2")
             s.saveDebug = !s.saveDebug;
-    }
-
-    int read_menu_choice()
-    {
-        std::cout << "Select (0-5): ";
-        std::string line;
-
-        // If user hits Ctrl+D / EOF, treat as Exit (0)
-        if (!std::getline(std::cin, line))
-            return 0;
-
-        line = trim(line);
-
-        if (line.size() == 1 && std::isdigit(static_cast<unsigned char>(line[0])))
-        {
-            return line[0] - '0'; // '0'..'5' -> 0..5
-        }
-
-        // anything else -> invalid (the app loop will print "Invalid choice.")
-        return -1;
     }
 
     std::vector<std::string> collect_images(const std::string &path, bool isDir)
@@ -174,14 +210,13 @@ Choose an option:
             out.push_back(path);
             return out;
         }
-
         for (auto &p : fs::recursive_directory_iterator(path))
         {
             if (!p.is_regular_file())
                 continue;
             auto ext = p.path().extension().string();
             for (auto &c : ext)
-                c = (char)tolower((unsigned char)c);
+                c = (char)std::tolower((unsigned char)c);
             if (ext == ".png" || ext == ".jpg" || ext == ".jpeg")
                 out.push_back(p.path().string());
         }

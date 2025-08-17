@@ -1,0 +1,22 @@
+
+services:
+  mce:
+    build:
+      context: .
+      dockerfile: Dockerfile   # your TUI-only Dockerfile
+    image: mce:tui
+    container_name: mce_tui
+    tty: true
+    stdin_open: true
+    environment:
+      - TERM=xterm-256color
+      - MCE_HOST_ROOT=/host        # used by the path remapper (below)
+    volumes:
+      # Give the container access to your whole C: drive
+      - type: bind
+        source: "C:\\"
+        target: /host/c
+      # (Optional) also mount D:
+      # - type: bind
+      #   source: "D:\\"
+      #   target: /host/d
